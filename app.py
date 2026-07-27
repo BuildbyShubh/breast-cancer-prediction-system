@@ -1,195 +1,173 @@
+# app.py
+
+import os
 import joblib
-import gradio as gr
+import traceback
 import numpy as np
+import gradio as gr
+import tensorflow as tf
 
 # ==========================================================
-# Load Model
+# Load the Scaler and TensorFlow Model
 # ==========================================================
 try:
-    model = joblib.load("breast_cancer_model.pkl")
+    # We must load BOTH the scaler and the neural network
+    scaler = joblib.load('breast_cancer_scaler.pkl')
+    deployed_nn = tf.keras.models.load_model('breast_cancer_model.h5')
+    print("Scaler and Deep Learning Model loaded successfully!")
 except Exception as e:
-    print(f"Error loading model: {e}")
-    model = None
+    print(f"Warning: Files not found or error loading. {e}")
+    scaler = None
+    deployed_nn = None
 
 # ==========================================================
-# Prediction Function
+# Prediction Function with Bulletproof Error Handling
 # ==========================================================
-def predict(
-    radius_mean,
-    texture_mean,
-    perimeter_mean,
-    area_mean,
-    smoothness_mean,
-    compactness_mean,
-    concavity_mean,
-    concave_points_mean,
-    symmetry_mean,
-    fractal_dimension_mean,
-    radius_se,
-    texture_se,
-    perimeter_se,
-    area_se,
-    smoothness_se,
-    compactness_se,
-    concavity_se,
-    concave_points_se,
-    symmetry_se,
-    fractal_dimension_se,
-    radius_worst,
-    texture_worst,
-    perimeter_worst,
-    area_worst,
-    smoothness_worst,
-    compactness_worst,
-    concavity_worst,
-    concave_points_worst,
-    symmetry_worst,
-    fractal_dimension_worst,
-):
+def predict_cancer(*features):
+    # Features are passed in as a tuple of 30 items. We convert to a list.
+    values = list(features)
 
-    if model is None:
-        return "❌ Model not loaded."
+    # 1. Empty input check
+    if any(v is None or str(v).strip() == "" for v in values):
+        return "❌ Please fill in all 30 medical measurements."
+
+    # 2. Type casting to float
+    try:
+        float_values = [float(v) for v in values]
+    except (ValueError, TypeError) as e:
+        return f"❌ Data Conversion Error. All inputs must be numbers.\n\nDetails: {str(e)}"
+
+    # 3. Model execution
+    if deployed_nn is None or scaler is None:
+        return "❌ Server Error: Model or Scaler failed to load. Check your repository files."
 
     try:
-        features = np.array([[
-            radius_mean,
-            texture_mean,
-            perimeter_mean,
-            area_mean,
-            smoothness_mean,
-            compactness_mean,
-            concavity_mean,
-            concave_points_mean,
-            symmetry_mean,
-            fractal_dimension_mean,
-            radius_se,
-            texture_se,
-            perimeter_se,
-            area_se,
-            smoothness_se,
-            compactness_se,
-            concavity_se,
-            concave_points_se,
-            symmetry_se,
-            fractal_dimension_se,
-            radius_worst,
-            texture_worst,
-            perimeter_worst,
-            area_worst,
-            smoothness_worst,
-            compactness_worst,
-            concavity_worst,
-            concave_points_worst,
-            symmetry_worst,
-            fractal_dimension_worst
-        ]])
+        # Convert the single row of 30 features into a 2D NumPy array
+        input_array = np.array([float_values])
 
-        prediction = model.predict(features)[0]
+        # --- CODE BLOCK: APPLY SCALING BEFORE PREDICTION ---
+        # The Neural Network was trained on scaled data, so we MUST scale the user's raw input
+        scaled_input = scaler.transform(input_array)
+        # ---------------------------------------------------
 
-        if prediction == 1:
-            return "🟢 Benign (Non-Cancerous)"
+        # Get the prediction probability from the Sigmoid activation function
+        prediction_prob = deployed_nn.predict(scaled_input)[0][0]
+
+        # Scikit-learn Breast Cancer target mapping: 0 = Malignant, 1 = Benign
+        if prediction_prob >= 0.5:
+            return (
+                f"🟢 Assessment Result (Confidence: {prediction_prob:.2%})\n\n"
+                "Classification: BENIGN\n\n"
+                "The cell characteristics suggest a non-cancerous tumor."
+            )
         else:
-            return "🔴 Malignant (Cancerous)"
+            malignant_confidence = 1 - prediction_prob
+            return (
+                f"🔴 Assessment Result (Confidence: {malignant_confidence:.2%})\n\n"
+                "Classification: MALIGNANT\n\n"
+                "The cell characteristics indicate a high risk of cancer. Please consult an oncologist immediately."
+            )
 
     except Exception as e:
-        return f"Prediction Error: {e}"
-
+        error_trace = traceback.format_exc()
+        print("RUNTIME ERROR:\n", error_trace)
+        return f"❌ Prediction failed due to an internal error.\n\nDEBUG INFO:\n{error_trace}"
 
 # ==========================================================
-# User Interface
+# Interface Setup (Enhanced Tabbed Layout)
 # ==========================================================
+with gr.Blocks(theme=gr.themes.Soft(primary_hue="teal", neutral_hue="slate")) as app:
+    
+    gr.Markdown("<h1 style='text-align: center;'>🔬 Breast Cancer Detection System (Deep Learning)</h1>")
+    gr.Markdown("<p style='text-align: center;'>Predict tumor classifications using a 30-feature Neural Network.</p>")
+    gr.Markdown("---")
 
-inputs = [
-    gr.Number(label="Radius Mean"),
-    gr.Number(label="Texture Mean"),
-    gr.Number(label="Perimeter Mean"),
-    gr.Number(label="Area Mean"),
-    gr.Number(label="Smoothness Mean"),
-    gr.Number(label="Compactness Mean"),
-    gr.Number(label="Concavity Mean"),
-    gr.Number(label="Concave Points Mean"),
-    gr.Number(label="Symmetry Mean"),
-    gr.Number(label="Fractal Dimension Mean"),
-    gr.Number(label="Radius SE"),
-    gr.Number(label="Texture SE"),
-    gr.Number(label="Perimeter SE"),
-    gr.Number(label="Area SE"),
-    gr.Number(label="Smoothness SE"),
-    gr.Number(label="Compactness SE"),
-    gr.Number(label="Concavity SE"),
-    gr.Number(label="Concave Points SE"),
-    gr.Number(label="Symmetry SE"),
-    gr.Number(label="Fractal Dimension SE"),
-    gr.Number(label="Radius Worst"),
-    gr.Number(label="Texture Worst"),
-    gr.Number(label="Perimeter Worst"),
-    gr.Number(label="Area Worst"),
-    gr.Number(label="Smoothness Worst"),
-    gr.Number(label="Compactness Worst"),
-    gr.Number(label="Concavity Worst"),
-    gr.Number(label="Concave Points Worst"),
-    gr.Number(label="Symmetry Worst"),
-    gr.Number(label="Fractal Dimension Worst"),
-]
+    # Layout: Using Tabs to organize 30 inputs cleanly
+    with gr.Tabs():
+        
+        # TAB 1: Mean Measurements
+        with gr.TabItem("1. Mean Metrics"):
+            with gr.Row():
+                with gr.Column():
+                    f1 = gr.Number(label="Mean Radius")
+                    f2 = gr.Number(label="Mean Texture")
+                    f3 = gr.Number(label="Mean Perimeter")
+                    f4 = gr.Number(label="Mean Area")
+                    f5 = gr.Number(label="Mean Smoothness")
+                with gr.Column():
+                    f6 = gr.Number(label="Mean Compactness")
+                    f7 = gr.Number(label="Mean Concavity")
+                    f8 = gr.Number(label="Mean Concave Points")
+                    f9 = gr.Number(label="Mean Symmetry")
+                    f10 = gr.Number(label="Mean Fractal Dimension")
 
-custom_css = """
-footer {
-    visibility: hidden;
-}
+        # TAB 2: Error Measurements
+        with gr.TabItem("2. Error Metrics"):
+            with gr.Row():
+                with gr.Column():
+                    f11 = gr.Number(label="Radius Error")
+                    f12 = gr.Number(label="Texture Error")
+                    f13 = gr.Number(label="Perimeter Error")
+                    f14 = gr.Number(label="Area Error")
+                    f15 = gr.Number(label="Smoothness Error")
+                with gr.Column():
+                    f16 = gr.Number(label="Compactness Error")
+                    f17 = gr.Number(label="Concavity Error")
+                    f18 = gr.Number(label="Concave Points Error")
+                    f19 = gr.Number(label="Symmetry Error")
+                    f20 = gr.Number(label="Fractal Dimension Error")
 
-.gradio-container {
-    max-width: 1100px !important;
-    margin: auto;
-}
+        # TAB 3: Worst Measurements
+        with gr.TabItem("3. Worst Metrics"):
+            with gr.Row():
+                with gr.Column():
+                    f21 = gr.Number(label="Worst Radius")
+                    f22 = gr.Number(label="Worst Texture")
+                    f23 = gr.Number(label="Worst Perimeter")
+                    f24 = gr.Number(label="Worst Area")
+                    f25 = gr.Number(label="Worst Smoothness")
+                with gr.Column():
+                    f26 = gr.Number(label="Worst Compactness")
+                    f27 = gr.Number(label="Worst Concavity")
+                    f28 = gr.Number(label="Worst Concave Points")
+                    f29 = gr.Number(label="Worst Symmetry")
+                    f30 = gr.Number(label="Worst Fractal Dimension")
 
-h1 {
-    text-align: center;
-}
+    # Output Section
+    gr.Markdown("---")
+    with gr.Row():
+        submit_btn = gr.Button("Run Neural Network Analysis", variant="primary", size="lg")
+        clear_btn = gr.ClearButton(size="lg")
+    
+    with gr.Row():
+        result_box = gr.Textbox(label="Deep Learning Assessment Result", lines=5, interactive=False)
 
-.developer {
-    margin-top: 20px;
-    padding: 15px;
-    border-radius: 10px;
-    background-color: #f5f5f5;
-}
-"""
+    # Footer
+    gr.Markdown("""
+    ---
+    ### 👨‍💻 About the Developer
+    **Created by:** Shubham sharma
+    * **LinkedIn:** [Connect with me](YOUR_LINKEDIN_URL_HERE)
+    * **GitHub:** [Check out my projects](YOUR_GITHUB_URL_HERE)
+    """)
 
-description = """
-### 🩺 Breast Cancer Prediction System
+    # Wire up the logic exactly in the order of the dataset
+    input_components = [
+        f1, f2, f3, f4, f5, f6, f7, f8, f9, f10,
+        f11, f12, f13, f14, f15, f16, f17, f18, f19, f20,
+        f21, f22, f23, f24, f25, f26, f27, f28, f29, f30
+    ]
+    
+    submit_btn.click(fn=predict_cancer, inputs=input_components, outputs=result_box)
+    clear_btn.add(input_components + [result_box])
 
-This application predicts whether a breast tumor is **Benign** or **Malignant**
-using a trained Machine Learning model.
-
----
-
-### 👨‍💻 Developer Information
-
-**Developer:** **Shubham Sharma**
-
-🎓 Bachelor of Computer Applications (BCA)
-
-🛡️ Machine Learning & Cyber Security Enthusiast
-
-📧 Email: **svats1310@gmail.com**
-
----
-
-⚠️ **Disclaimer**
-
-This application is developed for educational and demonstration purposes only.
-It should not be used as a substitute for professional medical advice or diagnosis.
-"""
-
-demo = gr.Interface(
-    fn=predict,
-    inputs=inputs,
-    outputs=gr.Textbox(label="Prediction Result"),
-    title="🩺 Breast Cancer Prediction System",
-    description=description,
-    theme=gr.themes.Soft(),
-    css=custom_css,
-    allow_flagging="never"
-)
-
+# ==========================================================
+# Launch Configuration
+# ==========================================================
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    port = int(os.environ.get("PORT", 10000))
+    print(f"Starting Gradio server on 0.0.0.0:{port}...")
+    app.launch(
+        server_name="0.0.0.0",
+        server_port=port,
+    )
