@@ -12,7 +12,7 @@ import tensorflow as tf
 # ==========================================================
 try:
     # We must load BOTH the scaler and the neural network
-    scaler = joblib.load('breast_cancer_scaler.pkl')
+    scaler = joblib.load('breast_cancer_model.pkl')
     deployed_nn = tf.keras.models.load_model('breast_cancer_model.h5')
     print("Scaler and Deep Learning Model loaded successfully!")
 except Exception as e:
